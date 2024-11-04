@@ -1,7 +1,7 @@
 'use client';
 
-import CheckboxList from '@/components/CheckboxList'; // 都道府県のチェックボックスリスト
-import { fetchPopulation } from '@/utils/api'; // API関数
+import CheckboxList from '@/components/CheckboxList'; // チェックボックスリストコンポーネント
+import { fetchPopulation } from '@/utils/api'; // APIから人口データを取得する関数
 import {
   CategoryScale,
   Chart,
@@ -13,7 +13,7 @@ import {
   Title,
   Tooltip,
 } from 'chart.js';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 Chart.register(
   LineController,
@@ -45,33 +45,43 @@ const PopulationApp = (): JSX.Element => {
   >({});
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstanceRef = useRef<Chart | null>(null);
+  const requestQueueRef = useRef<(() => void)[]>([]);
 
-  const handlePrefectureChange = async (
-    prefCode: number,
-    checked: boolean,
-    prefName: string,
-  ) => {
-    if (checked) {
-      const data = await fetchPopulation(prefCode, '総人口');
-      setPopulationData((prevData) => ({
-        ...prevData,
-        [prefCode]: data || [],
-      }));
-      setSelectedPrefectures([
-        ...selectedPrefectures,
-        { code: prefCode, name: prefName },
-      ]);
-    } else {
-      setSelectedPrefectures(
-        selectedPrefectures.filter((pref) => pref.code !== prefCode),
-      );
-      setPopulationData((prevData) => {
-        const newData = { ...prevData };
-        delete newData[prefCode];
-        return newData;
-      });
+  const processQueue = () => {
+    if (requestQueueRef.current.length > 0) {
+      const request = requestQueueRef.current.shift();
+      if (request) request();
     }
   };
+
+  const handlePrefectureChange = useCallback(
+    async (prefCode: number, checked: boolean, prefName: string) => {
+      requestQueueRef.current.push(async () => {
+        if (checked) {
+          const data = await fetchPopulation(prefCode, '総人口');
+          setPopulationData((prevData) => ({
+            ...prevData,
+            [prefCode]: data || [],
+          }));
+          setSelectedPrefectures((prevPrefectures) => [
+            ...prevPrefectures,
+            { code: prefCode, name: prefName },
+          ]);
+        } else {
+          setSelectedPrefectures((prevPrefectures) =>
+            prevPrefectures.filter((pref) => pref.code !== prefCode),
+          );
+          setPopulationData((prevData) => {
+            const newData = { ...prevData };
+            delete newData[prefCode];
+            return newData;
+          });
+        }
+      });
+      processQueue();
+    },
+    [],
+  );
 
   useEffect(() => {
     if (chartInstanceRef.current) {
@@ -87,10 +97,10 @@ const PopulationApp = (): JSX.Element => {
             populationData[selectedPrefectures[0]?.code]?.map(
               (item) => item.year,
             ) || [],
-          datasets: selectedPrefectures.map((pref) => ({
+          datasets: selectedPrefectures.map((pref, index) => ({
             label: pref.name,
             data: populationData[pref.code]?.map((item) => item.value) || [],
-            borderColor: `#${Math.floor(Math.random() * 16777215).toString(16)}`,
+            borderColor: `hsl(${(index * 60) % 360}, 70%, 50%)`,
             fill: false,
           })),
         },
